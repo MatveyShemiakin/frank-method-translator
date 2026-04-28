@@ -1,5 +1,57 @@
 import { createPromptPayload, validateTranslationItems } from './frank.js';
 
+function frankFromPlainTranslation(original, translated) {
+  const cleanOriginal = String(original || '').trim();
+  const cleanTranslated = String(translated || '').trim();
+  return {
+    original: cleanOriginal,
+    adapted: `${cleanOriginal} (${cleanTranslated}).`,
+    clean: cleanOriginal
+  };
+}
+
+export async function translateViaMyMemory(segments) {
+  const items = [];
+  for (const segment of segments) {
+    const url = new URL('https://api.mymemory.translated.net/get');
+    url.searchParams.set('q', segment.slice(0, 490));
+    url.searchParams.set('langpair', 'en|ru');
+    url.searchParams.set('mt', '1');
+    const response = await fetch(url.toString());
+    if (!response.ok) throw new Error(`MyMemory error ${response.status}`);
+    const data = await response.json();
+    const translated = data?.responseData?.translatedText;
+    if (!translated) throw new Error('MyMemory returned empty translation.');
+    items.push(frankFromPlainTranslation(segment, translated));
+  }
+  return validateTranslationItems(items);
+}
+
+export async function translateViaLibreTranslate(segments, settings = {}) {
+  const endpoint = settings.libreEndpoint || settings.endpoint || 'https://libretranslate.com/translate';
+  const items = [];
+  for (const segment of segments) {
+    const body = {
+      q: segment,
+      source: 'en',
+      target: 'ru',
+      format: 'text'
+    };
+    if (settings.libreApiKey) body.api_key = settings.libreApiKey;
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!response.ok) throw new Error(`LibreTranslate error ${response.status}: ${await response.text()}`);
+    const data = await response.json();
+    const translated = data?.translatedText;
+    if (!translated) throw new Error('LibreTranslate returned empty translation.');
+    items.push(frankFromPlainTranslation(segment, translated));
+  }
+  return validateTranslationItems(items);
+}
+
 export async function translateViaProxy(segments, settings = {}) {
   const endpoint = settings.endpoint || 'http://localhost:8787/api/frankify';
   const response = await fetch(endpoint, {
