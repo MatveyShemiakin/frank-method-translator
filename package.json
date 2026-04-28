@@ -1,0 +1,35 @@
+{
+  "name": "frank-method-translator",
+  "version": "1.0.0",
+  "description": "Web and CLI tool for transforming English texts into an Ilya Frank-style bilingual reading format.",
+  "type": "module",
+  "private": false,
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "server": "node server/proxy.js",
+    "cli": "node cli/frankify.mjs",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "keywords": [
+    "translation",
+    "language-learning",
+    "ilya-frank-method",
+    "bilingual-reader",
+    "openai"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "vite": "^7.0.0"
+  }
+}
