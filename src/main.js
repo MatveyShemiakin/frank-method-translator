@@ -1,4 +1,6 @@
 import './styles.css';
+import * as pdfjsLib from 'pdfjs-dist';
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
 import {
   chunkSegments,
   demoTranslateSegment,
@@ -7,16 +9,23 @@ import {
   splitByMode,
   validateTranslationItems
 } from './frank.js';
-import { translateViaDirectOpenAI, translateViaProxy } from './providers.js';
+import {
+  translateViaDirectOpenAI,
+  translateViaLibreTranslate,
+  translateViaMyMemory,
+  translateViaProxy
+} from './providers.js';
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 const app = document.querySelector('#app');
 
 app.innerHTML = `
   <main class="container">
     <section class="hero">
-      <div class="badge">English → Russian · Ilya Frank-style reader</div>
+      <div class="badge">English → Russian · bilingual reader</div>
       <h1>Переводчик текстов по методу Ильи Франка</h1>
-      <p class="lead">Загрузите английскую статью или главу книги, выберите режим разбиения и получите учебный текст: английский фрагмент с русским пояснением, затем повтор чистого оригинала.</p>
+      <p class="lead">Загрузите английскую статью, главу книги или PDF, выберите провайдера и получите учебный текст: английский фрагмент с русским пояснением, затем повтор чистого оригинала.</p>
     </section>
 
     <section class="card">
@@ -24,55 +33,45 @@ app.innerHTML = `
         <div class="field">
           <label for="provider">Провайдер</label>
           <select id="provider">
+            <option value="mymemory" selected>MyMemory online</option>
+            <option value="libre">LibreTranslate endpoint</option>
             <option value="proxy">Локальный proxy / API</option>
             <option value="direct">OpenAI напрямую из браузера</option>
             <option value="demo">Демо без API</option>
           </select>
         </div>
         <div class="field">
-          <label for="endpoint">Proxy endpoint</label>
-          <input id="endpoint" value="http://localhost:8787/api/frankify" />
+          <label for="endpoint">Proxy / LibreTranslate endpoint</label>
+          <input id="endpoint" value="https://libretranslate.com/translate" />
         </div>
         <div class="field">
-          <label for="model">Модель</label>
+          <label for="model">Модель OpenAI</label>
           <input id="model" value="gpt-4.1-mini" />
         </div>
         <div class="field">
           <label for="level">Уровень читателя</label>
-          <select id="level">
-            <option>A2</option>
-            <option selected>B1</option>
-            <option>B2</option>
-            <option>C1</option>
-            <option>Professional</option>
-          </select>
+          <select id="level"><option>A2</option><option selected>B1</option><option>B2</option><option>C1</option><option>Professional</option></select>
         </div>
         <div class="field">
           <label for="mode">Разбивка</label>
-          <select id="mode">
-            <option value="paragraph" selected>По абзацам</option>
-            <option value="sentence">По предложениям</option>
-          </select>
+          <select id="mode"><option value="paragraph" selected>По абзацам</option><option value="sentence">По предложениям</option></select>
         </div>
         <div class="field">
-          <label for="maxChars">Размер API-пакета</label>
-          <input id="maxChars" type="number" min="500" max="12000" step="500" value="3500" />
+          <label for="maxChars">Размер пакета</label>
+          <input id="maxChars" type="number" min="300" max="12000" step="100" value="900" />
         </div>
         <div class="field">
           <label for="title">Название результата</label>
           <input id="title" value="Frank Method Text" />
         </div>
         <div class="field">
-          <label for="file">TXT / MD файл</label>
-          <input id="file" type="file" accept=".txt,.md,.markdown,text/plain,text/markdown" />
+          <label for="file">PDF / TXT / MD файл</label>
+          <input id="file" type="file" accept=".pdf,.txt,.md,.markdown,application/pdf,text/plain,text/markdown" />
         </div>
       </div>
       <details>
-        <summary class="small">OpenAI API key для прямого режима. Для публикации на GitHub Pages лучше использовать proxy, а это поле оставить пустым.</summary>
-        <div class="field" style="margin-top: 10px; max-width: 560px;">
-          <label for="apiKey">API key</label>
-          <input id="apiKey" type="password" autocomplete="off" placeholder="sk-..." />
-        </div>
+        <summary class="small">API key для прямого OpenAI-режима. Не сохраняется и не отправляется в GitHub.</summary>
+        <div class="field" style="margin-top: 10px; max-width: 560px;"><label for="apiKey">API key</label><input id="apiKey" type="password" autocomplete="off" placeholder="sk-..." /></div>
       </details>
     </section>
 
@@ -80,35 +79,13 @@ app.innerHTML = `
       <div class="card">
         <h2>Исходный английский текст</h2>
         <textarea id="source" spellcheck="false" placeholder="Paste English text here...">The study examined visual outcomes after cataract surgery. Patients were followed for six months, and postoperative refraction was compared with the predicted target.</textarea>
-        <div class="actions">
-          <button class="primary" id="run">Преобразовать</button>
-          <button class="secondary" id="clear">Очистить</button>
-        </div>
+        <div class="actions"><button class="primary" id="run">Преобразовать</button><button class="secondary" id="clear">Очистить</button></div>
         <div id="status" class="status"></div>
       </div>
       <div class="card">
         <h2>Результат</h2>
         <div id="output" class="output" aria-live="polite"></div>
-        <div class="actions">
-          <button class="secondary" id="copy">Скопировать</button>
-          <button class="secondary" id="downloadTxt">Скачать TXT</button>
-          <button class="secondary" id="downloadMd">Скачать Markdown</button>
-        </div>
-      </div>
-    </section>
-
-    <section class="help">
-      <div class="item">
-        <h3>Для GitHub Pages</h3>
-        <p>Публикуется как обычный статический сайт. Реальные ключи API не коммитятся.</p>
-      </div>
-      <div class="item">
-        <h3>Для больших книг</h3>
-        <p>Используйте CLI: он читает TXT/MD, дробит текст и пишет готовый Markdown.</p>
-      </div>
-      <div class="item">
-        <h3>Юридически безопаснее</h3>
-        <p>Обрабатывайте свои тексты, public domain или материалы, на которые есть права.</p>
+        <div class="actions"><button class="secondary" id="copy">Скопировать</button><button class="secondary" id="downloadTxt">Скачать TXT</button><button class="secondary" id="downloadMd">Скачать Markdown</button></div>
       </div>
     </section>
   </main>
@@ -127,10 +104,11 @@ function getSettings() {
   return {
     provider: $('provider').value,
     endpoint: $('endpoint').value.trim(),
+    libreEndpoint: $('endpoint').value.trim(),
     model: $('model').value.trim() || 'gpt-4.1-mini',
     level: $('level').value,
     mode: $('mode').value,
-    maxChars: Number($('maxChars').value || 3500),
+    maxChars: Number($('maxChars').value || 900),
     title: $('title').value.trim() || 'Frank Method Text',
     apiKey: $('apiKey').value.trim(),
     sourceLanguage: 'English',
@@ -139,32 +117,53 @@ function getSettings() {
   };
 }
 
+async function extractPdfText(file) {
+  const buffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+  const pages = [];
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    setStatus(`Извлекаю текст PDF: страница ${pageNumber}/${pdf.numPages}...`);
+    const page = await pdf.getPage(pageNumber);
+    const content = await page.getTextContent();
+    const text = content.items.map((item) => item.str).join(' ').replace(/\s+/g, ' ').trim();
+    if (text) pages.push(text);
+  }
+  return pages.join('\n\n');
+}
+
 async function translateChunk(chunk, settings) {
   if (settings.provider === 'demo') return chunk.map(demoTranslateSegment);
+  if (settings.provider === 'mymemory') return translateViaMyMemory(chunk, settings);
+  if (settings.provider === 'libre') return translateViaLibreTranslate(chunk, settings);
   if (settings.provider === 'direct') return translateViaDirectOpenAI(chunk, settings);
   return translateViaProxy(chunk, settings);
 }
 
 $('file').addEventListener('change', async (event) => {
-  const file = event.target.files?.[0];
-  if (!file) return;
-  $('source').value = await file.text();
-  setStatus(`Файл загружен: ${file.name}`);
+  try {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+    $('source').value = isPdf ? await extractPdfText(file) : await file.text();
+    setStatus(`Файл загружен: ${file.name}. Символов: ${$('source').value.length}.`, 'ok');
+  } catch (error) {
+    setStatus(`Не удалось прочитать файл: ${error.message}`, 'error');
+  }
 });
 
 $('run').addEventListener('click', async () => {
   try {
     const settings = getSettings();
     const text = $('source').value.trim();
-    if (!text) throw new Error('Добавьте английский текст.');
+    if (!text) throw new Error('Добавьте английский текст или загрузите файл.');
     const segments = splitByMode(text, settings.mode);
     if (!segments.length) throw new Error('Не удалось выделить фрагменты текста.');
     const chunks = chunkSegments(segments, settings.maxChars);
-    setStatus(`Найдено фрагментов: ${segments.length}. API-пакетов: ${chunks.length}.`);
+    setStatus(`Найдено фрагментов: ${segments.length}. Пакетов: ${chunks.length}.`);
     $('output').textContent = '';
     lastItems = [];
     for (let i = 0; i < chunks.length; i += 1) {
-      setStatus(`Обрабатываю пакет ${i + 1} из ${chunks.length}...`);
+      setStatus(`Перевожу пакет ${i + 1} из ${chunks.length}...`);
       const translated = validateTranslationItems(await translateChunk(chunks[i], settings));
       lastItems.push(...translated);
       $('output').textContent = formatPlainText(lastItems, { repeatOriginal: true });
