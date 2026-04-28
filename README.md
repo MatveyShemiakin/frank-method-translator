@@ -1,33 +1,47 @@
 # Frank Method Translator
 
-Веб-приложение и CLI для преобразования английских статей и глав книг в учебный русско-английский формат: английский фрагмент с русскими пояснениями, затем тот же фрагмент без подсказок.
+Программное обеспечение для преобразования английских статей и книг в учебный русско-английский формат, вдохновленный методом Ильи Франка.
 
-## Возможности
+Формат результата:
 
-- Веб-интерфейс для GitHub Pages.
-- Demo-режим без API.
-- Локальный Node.js proxy для OpenAI, чтобы не публиковать API-ключ в браузере.
-- CLI для обработки TXT/MD файлов.
+```text
+English phrase (русский перевод и пояснение), next phrase (перевод и пояснение).
+
+English phrase, next phrase.
+```
+
+То есть читатель сначала видит адаптированный английский текст с русскими пояснениями, а затем тот же фрагмент без подсказок.
+
+## Что входит
+
+- Веб-интерфейс для GitHub Pages: вставка текста, загрузка TXT/MD, скачивание TXT/Markdown.
+- Локальный Node.js proxy, чтобы API-ключ не попадал в публичный фронтенд.
+- CLI для больших файлов: удобно обрабатывать главы книг и длинные статьи.
+- Демо-режим без API для проверки интерфейса.
 - Тесты ядра разбиения и форматирования.
-- GitHub Actions workflow для сборки Pages.
+- GitHub Actions для сборки и публикации на GitHub Pages.
 
-## Важно об авторских правах
+## Важное ограничение
 
-Не используйте проект для нарушения авторских прав. Обрабатывайте собственные тексты, public domain, материалы с разрешением правообладателя или короткие законные фрагменты для личного обучения.
+Этот проект не должен использоваться для нарушения авторских прав. Обрабатывайте:
 
-## Локальный запуск
+1. свои тексты;
+2. public domain;
+3. материалы с разрешением правообладателя;
+4. короткие законные фрагменты для личного обучения в рамках применимого законодательства.
+
+## Быстрый старт локально
 
 Требуется Node.js 20.19+.
 
 ```bash
-git clone https://github.com/MatveyShemiakin/frank-method-translator.git
+git clone https://github.com/YOUR_USER/frank-method-translator.git
 cd frank-method-translator
 npm install
 cp .env.example .env
-npm run dev
 ```
 
-Для настоящего перевода через OpenAI откройте `.env` и добавьте ключ:
+Откройте `.env` и добавьте ключ:
 
 ```bash
 OPENAI_API_KEY=sk-...
@@ -36,51 +50,79 @@ PORT=8787
 ALLOWED_ORIGIN=http://localhost:5173
 ```
 
-Затем в отдельном терминале запустите proxy:
+Запустите proxy:
 
 ```bash
 npm run server
 ```
 
-В интерфейсе выберите `Proxy/OpenAI`.
-
-## CLI
-
-Demo без API:
+Во втором терминале запустите интерфейс:
 
 ```bash
-node cli/frankify.mjs --input samples/article.txt --output output/demo.md --provider demo
+npm run dev
 ```
 
-Через OpenAI:
+Откройте адрес, который покажет Vite, обычно `http://localhost:5173`.
+
+## CLI для книги или большой статьи
 
 ```bash
-node cli/frankify.mjs --input samples/article.txt --output output/article.frank.md --provider openai --level B1
+node cli/frankify.mjs \
+  --input samples/article.txt \
+  --output output/article.frank.md \
+  --mode paragraph \
+  --level B1 \
+  --title "My Article in Frank Method"
 ```
 
-## GitHub Pages
+Демо без API:
 
-1. Откройте `Settings -> Pages`.
-2. В `Build and deployment` выберите `GitHub Actions`.
-3. Сделайте любой commit в `main`, workflow соберет сайт.
-4. После успешной сборки ссылка будет в разделе `Deployments` или `Settings -> Pages`.
+```bash
+node cli/frankify.mjs \
+  --input samples/article.txt \
+  --output output/demo.md \
+  --provider demo
+```
+
+## Публикация на GitHub Pages
+
+1. Создайте новый репозиторий на GitHub.
+2. Загрузите все файлы этого проекта.
+3. Откройте `Settings → Pages`.
+4. В `Build and deployment` выберите `GitHub Actions`.
+5. Сделайте commit в ветку `main`.
+6. GitHub Actions соберет сайт и опубликует Pages.
+
+Подробная инструкция: [`docs/GITHUB_PAGES.md`](docs/GITHUB_PAGES.md).
+
+## Почему нужен proxy
+
+Если вы вставите API key прямо в JavaScript, любой посетитель сайта сможет увидеть ключ в браузере. Поэтому production-вариант должен вызывать ваш backend/proxy. Для личного локального использования можно включить прямой режим, но публично так делать нельзя.
 
 ## Структура
 
 ```text
-cli/frankify.mjs            CLI
-server/proxy.js             локальный proxy
-src/frank.js                разбиение и форматирование
-src/providers.js            OpenAI/proxy provider
-src/main.js                 веб-интерфейс
-src/styles.css              стили
-tests/core.test.mjs         тесты
-.github/workflows/pages.yml GitHub Pages workflow
+.
+├── cli/frankify.mjs              # CLI для обработки файлов
+├── server/proxy.js               # локальный proxy к OpenAI Responses API
+├── src/frank.js                  # разбиение, chunking, форматирование
+├── src/providers.js              # OpenAI/proxy providers
+├── src/main.js                   # веб-интерфейс
+├── tests/core.test.mjs           # тесты ядра
+├── docs/                         # документация
+└── .github/workflows/pages.yml   # GitHub Pages workflow
 ```
 
-## Проверка
+## Настройка качества перевода
+
+В `src/providers.js` можно менять system prompt. Для медицинских/научных статей уже включено правило: точная терминология важнее литературного сглаживания. Для художественных книг можно ослабить это правило и добавить сохранение стиля автора.
+
+## Тесты
 
 ```bash
 npm test
-npm run build
 ```
+
+## Production-идея
+
+Для многопользовательского сайта лучше вынести `server/proxy.js` на Render, Railway, Fly.io, Vercel Functions или другой backend-хостинг, а в GitHub Pages указать URL этого backend в поле `Proxy endpoint`.

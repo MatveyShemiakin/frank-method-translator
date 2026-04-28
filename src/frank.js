@@ -1,60 +1,152 @@
-export function splitByMode(text, mode = 'paragraph') {
-  const clean = String(text || '').replace(/\r\n/g, '\n').trim();
-  if (!clean) return [];
-  if (mode === 'sentence') {
-    return clean
-      .replace(/\s+/g, ' ')
-      .split(/(?<=[.!?])\s+(?=[A-ZА-ЯЁ0-9"'])/u)
-      .map((x) => x.trim())
+const DEFAULT_ABBREVIATIONS = [
+  'Mr.', 'Mrs.', 'Ms.', 'Dr.', 'Prof.', 'Sr.', 'Jr.', 'St.', 'vs.', 'etc.', 'e.g.', 'i.e.', 'U.S.', 'U.K.'
+];
+
+export function normalizeText(text = '') {
+  return String(text)
+    .replace(/\r\n/g, '\n')
+    .replace(/[\t\f\v]+/g, ' ')
+    .replace(/\u00a0/g, ' ')
+    .replace(/ {2,}/g, ' ')
+    .trim();
+}
+
+export function splitParagraphs(text = '') {
+  const normalized = normalizeText(text);
+  if (!normalized) return [];
+  return normalized
+    .split(/\n{2,}/)
+    .map((p) => p.replace(/\n+/g, ' ').trim())
+    .filter(Boolean);
+}
+
+function protectAbbreviations(text) {
+  let protectedText = text;
+  const placeholders = new Map();
+  DEFAULT_ABBREVIATIONS.forEach((abbr, index) => {
+    const key = `__ABBR_${index}__`;
+    const safe = abbr.replace('.', '<DOT>');
+    placeholders.set(key, abbr);
+    protectedText = protectedText.split(abbr).join(safe);
+  });
+  return { protectedText, placeholders };
+}
+
+function restoreAbbreviations(text) {
+  return text.replace(/<DOT>/g, '.');
+}
+
+export function splitSentences(text = '') {
+  const paragraphs = splitParagraphs(text);
+  const sentences = [];
+  for (const paragraph of paragraphs) {
+    const { protectedText } = protectAbbreviations(paragraph);
+    const parts = protectedText
+      .split(/(?<=[.!?])\s+(?=["'“‘(]*[A-Z0-9])/g)
+      .map(restoreAbbreviations)
+      .map((part) => part.trim())
       .filter(Boolean);
+    sentences.push(...parts);
   }
-  return clean.split(/\n\s*\n/g).map((x) => x.trim()).filter(Boolean);
+  return sentences;
+}
+
+export function splitByMode(text, mode = 'paragraph') {
+  if (mode === 'sentence') return splitSentences(text);
+  return splitParagraphs(text);
 }
 
 export function chunkSegments(segments, maxChars = 3500) {
   const chunks = [];
   let current = [];
-  let size = 0;
+  let length = 0;
   for (const segment of segments) {
-    const next = String(segment || '');
-    if (current.length && size + next.length > maxChars) {
+    const separator = current.length ? 1 : 0;
+    let nextLength = length + segment.length + separator;
+    if (current.length && nextLength > maxChars) {
       chunks.push(current);
       current = [];
-      size = 0;
+      length = 0;
+      nextLength = segment.length;
     }
-    current.push(next);
-    size += next.length;
+    current.push(segment);
+    length = nextLength;
   }
   if (current.length) chunks.push(current);
   return chunks;
 }
 
-export function demoTranslateSegment(segment) {
-  return {
-    source: segment,
-    adapted: `${segment} (демо-перевод: здесь будет русский перевод и краткое пояснение).`,
-    note: 'Demo mode: подключите proxy/OpenAI для настоящего перевода.'
-  };
+export function escapeHtml(value = '') {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
 }
 
-export function validateTranslationItems(items) {
-  if (!Array.isArray(items)) throw new Error('Translator returned invalid JSON: items must be an array.');
-  return items.map((item) => ({
-    source: String(item.source || '').trim(),
-    adapted: String(item.adapted || '').trim(),
-    note: String(item.note || '').trim()
-  })).filter((item) => item.source && item.adapted);
+export function frankBlock({ original, adapted, clean }, options = {}) {
+  const repeatOriginal = options.repeatOriginal !== false;
+  const adaptedText = adapted || '';
+  const cleanText = clean || original || '';
+  if (repeatOriginal) return `${adaptedText}\n\n${cleanText}`.trim();
+  return adaptedText.trim();
 }
 
 export function formatMarkdown(items, options = {}) {
-  const title = options.title || 'Frank Method Text';
-  const repeatOriginal = options.repeatOriginal !== false;
-  const lines = [`# ${title}`, ''];
-  for (const item of items) {
-    lines.push(item.adapted);
-    if (item.note) lines.push('', `> ${item.note}`);
-    if (repeatOriginal) lines.push('', item.source);
-    lines.push('', '---', '');
+  const title = options.title || 'Text in Ilya Frank style';
+  const blocks = items.map((item, index) => {
+    const body = frankBlock(item, options);
+    return `### ${index + 1}\n\n${body}`;
+  });
+  return `# ${title}\n\n${blocks.join('\n\n---\n\n')}\n`;
+}
+
+export function formatPlainText(items, options = {}) {
+  return items.map((item) => frankBlock(item, options)).join('\n\n---\n\n');
+}
+
+export function validateTranslationItems(items) {
+  if (!Array.isArray(items)) throw new Error('Translator returned a non-array response.');
+  return items.map((item, index) => {
+    if (!item || typeof item !== 'object') {
+      throw new Error(`Invalid item at index ${index}.`);
+    }
+    const original = String(item.original || item.clean || '').trim();
+    const adapted = String(item.adapted || '').trim();
+    const clean = String(item.clean || original).trim();
+    if (!original || !adapted) {
+      throw new Error(`Translator returned an incomplete item at index ${index}.`);
+    }
+    return { original, adapted, clean };
+  });
+}
+
+export function demoTranslateSegment(segment) {
+  const replacements = [
+    [/\bthe\b/gi, 'the — определенный артикль'],
+    [/\band\b/gi, 'and — и'],
+    [/\bworld\b/gi, 'world — мир'],
+    [/\bpatient\b/gi, 'patient — пациент'],
+    [/\bstudy\b/gi, 'study — исследование'],
+    [/\bbook\b/gi, 'book — книга'],
+    [/\barticle\b/gi, 'article — статья']
+  ];
+  let glossary = [];
+  for (const [regex, value] of replacements) {
+    if (regex.test(segment)) glossary.push(value);
   }
-  return lines.join('\n').trim() + '\n';
+  glossary = [...new Set(glossary)];
+  const adapted = `${segment} (${glossary.length ? glossary.join('; ') : 'демо-пояснение: подключите API для полноценного перевода'}).`;
+  return { original: segment, adapted, clean: segment };
+}
+
+export function createPromptPayload(segments, settings = {}) {
+  return {
+    sourceLanguage: settings.sourceLanguage || 'English',
+    targetLanguage: settings.targetLanguage || 'Russian',
+    level: settings.level || 'B1',
+    style: settings.style || 'classic',
+    segments
+  };
 }

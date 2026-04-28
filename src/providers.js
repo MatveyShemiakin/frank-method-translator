@@ -1,3 +1,41 @@
+import { createPromptPayload, validateTranslationItems } from './frank.js';
+
+export async function translateViaProxy(segments, settings = {}) {
+  const endpoint = settings.endpoint || 'http://localhost:8787/api/frankify';
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(createPromptPayload(segments, settings))
+  });
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(`Proxy error ${response.status}: ${message}`);
+  }
+  const data = await response.json();
+  return validateTranslationItems(data.items);
+}
+
+export async function translateViaDirectOpenAI(segments, settings = {}) {
+  const key = settings.apiKey;
+  if (!key) throw new Error('OpenAI API key is required for direct browser mode. Prefer local proxy for real projects.');
+  const model = settings.model || 'gpt-4.1-mini';
+  const payload = openAIRequestBody(createPromptPayload(segments, settings), model);
+  const response = await fetch('https://api.openai.com/v1/responses', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${key}`
+    },
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(`OpenAI error ${response.status}: ${message}`);
+  }
+  const data = await response.json();
+  return validateTranslationItems(parseOpenAIResponse(data).items);
+}
+
 export function openAIRequestBody(payload, model = 'gpt-4.1-mini') {
   return {
     model,
@@ -8,12 +46,13 @@ export function openAIRequestBody(payload, model = 'gpt-4.1-mini') {
           {
             type: 'input_text',
             text: [
-              'You transform English text into an Ilya Frank-inspired bilingual reading format for Russian-speaking learners.',
-              'For each segment return JSON only.',
-              'Keep the original English meaning and terminology exactly.',
-              'For scientific and medical text, preserve technical terms and translate precisely rather than artistically.',
-              'The adapted field must contain the English segment with Russian translation/explanation in parentheses after meaningful phrases.',
-              'Do not add copyrighted text beyond the user-provided segment.'
+              'You transform English prose into a bilingual Russian learning text inspired by Ilya Frank style.',
+              'For each input segment, preserve the complete original meaning.',
+              'Create adapted text in this pattern: short English phrase followed by a natural Russian translation/explanation in parentheses, continuing through the whole segment.',
+              'Then provide the clean original English text separately.',
+              'Do not omit sentences. Do not add facts. Keep names, numbers, citations, and terminology intact.',
+              'For articles and scientific prose, prefer accurate terminology over literary smoothing.',
+              'Return only JSON that matches the schema.'
             ].join(' ')
           }
         ]
@@ -23,13 +62,7 @@ export function openAIRequestBody(payload, model = 'gpt-4.1-mini') {
         content: [
           {
             type: 'input_text',
-            text: JSON.stringify({
-              sourceLanguage: payload.sourceLanguage || 'English',
-              targetLanguage: payload.targetLanguage || 'Russian',
-              learnerLevel: payload.level || 'B1',
-              style: payload.style || 'classic',
-              segments: payload.segments || []
-            })
+            text: JSON.stringify(payload)
           }
         ]
       }
@@ -37,7 +70,8 @@ export function openAIRequestBody(payload, model = 'gpt-4.1-mini') {
     text: {
       format: {
         type: 'json_schema',
-        name: 'frank_method_translation',
+        name: 'frank_translation_schema',
+        strict: true,
         schema: {
           type: 'object',
           additionalProperties: false,
@@ -48,11 +82,11 @@ export function openAIRequestBody(payload, model = 'gpt-4.1-mini') {
                 type: 'object',
                 additionalProperties: false,
                 properties: {
-                  source: { type: 'string' },
+                  original: { type: 'string' },
                   adapted: { type: 'string' },
-                  note: { type: 'string' }
+                  clean: { type: 'string' }
                 },
-                required: ['source', 'adapted', 'note']
+                required: ['original', 'adapted', 'clean']
               }
             }
           },
@@ -64,36 +98,12 @@ export function openAIRequestBody(payload, model = 'gpt-4.1-mini') {
 }
 
 export function parseOpenAIResponse(data) {
-  const direct = data?.output_text;
-  if (direct) return JSON.parse(direct);
-
-  const text = data?.output
+  if (data.output_text) return JSON.parse(data.output_text);
+  const text = data.output
     ?.flatMap((item) => item.content || [])
-    ?.filter((part) => part.type === 'output_text' || part.type === 'text')
-    ?.map((part) => part.text)
-    ?.join('\n');
-
-  if (!text) throw new Error('OpenAI response did not contain output text.');
+    ?.map((part) => part.text || '')
+    ?.join('')
+    ?.trim();
+  if (!text) throw new Error('OpenAI response has no output text.');
   return JSON.parse(text);
-}
-
-export async function translateViaProxy({ endpoint, segments, level, style }) {
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      sourceLanguage: 'English',
-      targetLanguage: 'Russian',
-      level,
-      style,
-      segments
-    })
-  });
-
-  if (!response.ok) {
-    const message = await response.text();
-    throw new Error(`Proxy error ${response.status}: ${message}`);
-  }
-
-  return response.json();
 }

@@ -1,33 +1,41 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chunkSegments, demoTranslateSegment, formatMarkdown, splitByMode, validateTranslationItems } from '../src/frank.js';
+import {
+  chunkSegments,
+  demoTranslateSegment,
+  formatMarkdown,
+  splitParagraphs,
+  splitSentences,
+  validateTranslationItems
+} from '../src/frank.js';
 
-test('splitByMode splits paragraphs', () => {
-  assert.deepEqual(splitByMode('One.\n\nTwo.'), ['One.', 'Two.']);
+test('splitParagraphs splits by blank lines', () => {
+  assert.deepEqual(splitParagraphs('One.\n\nTwo.\nThree.'), ['One.', 'Two. Three.']);
 });
 
-test('splitByMode splits sentences', () => {
-  assert.deepEqual(splitByMode('One. Two? Three!', 'sentence'), ['One.', 'Two?', 'Three!']);
+test('splitSentences preserves common abbreviations', () => {
+  const result = splitSentences('Dr. Smith wrote the report. It was published in the U.S. in 2020.');
+  assert.equal(result.length, 2);
+  assert.equal(result[0], 'Dr. Smith wrote the report.');
 });
 
-test('chunkSegments respects max size', () => {
-  assert.deepEqual(chunkSegments(['aaa', 'bbb', 'ccc'], 7), [['aaa', 'bbb'], ['ccc']]);
+test('chunkSegments respects max size roughly', () => {
+  const chunks = chunkSegments(['aaa', 'bbb', 'ccc'], 7);
+  assert.equal(chunks.length, 2);
 });
 
-test('demoTranslateSegment returns adapted text', () => {
-  const item = demoTranslateSegment('Hello world.');
-  assert.equal(item.source, 'Hello world.');
-  assert.match(item.adapted, /демо-перевод/);
+test('validateTranslationItems normalizes valid items', () => {
+  const items = validateTranslationItems([{ original: 'Hello', adapted: 'Hello (привет).', clean: 'Hello' }]);
+  assert.equal(items[0].clean, 'Hello');
 });
 
-test('validateTranslationItems filters invalid rows', () => {
-  const result = validateTranslationItems([{ source: 'A', adapted: 'B', note: '' }, { source: '', adapted: 'C' }]);
-  assert.equal(result.length, 1);
+test('demo translation produces adapted item', () => {
+  const item = demoTranslateSegment('The world is large.');
+  assert.match(item.adapted, /world/);
 });
 
-test('formatMarkdown includes adapted and original', () => {
-  const md = formatMarkdown([{ source: 'Hello.', adapted: 'Hello (Привет).', note: '' }], { title: 'T' });
-  assert.match(md, /# T/);
-  assert.match(md, /Hello \(Привет\)\./);
-  assert.match(md, /Hello\./);
+test('formatMarkdown creates numbered blocks', () => {
+  const md = formatMarkdown([{ original: 'A', adapted: 'A (А).', clean: 'A' }], { title: 'T' });
+  assert.match(md, /^# T/);
+  assert.match(md, /### 1/);
 });

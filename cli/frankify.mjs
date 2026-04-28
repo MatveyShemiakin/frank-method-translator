@@ -2,7 +2,13 @@
 import 'dotenv/config';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { chunkSegments, demoTranslateSegment, formatMarkdown, splitByMode, validateTranslationItems } from '../src/frank.js';
+import {
+  chunkSegments,
+  demoTranslateSegment,
+  formatMarkdown,
+  splitByMode,
+  validateTranslationItems
+} from '../src/frank.js';
 import { openAIRequestBody, parseOpenAIResponse } from '../src/providers.js';
 
 function parseArgs(argv) {
@@ -39,13 +45,25 @@ function help() {
 async function translateOpenAI(segments, args) {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error('OPENAI_API_KEY is missing. Copy .env.example to .env and fill it.');
-  const payload = { sourceLanguage: 'English', targetLanguage: 'Russian', level: args.level, style: 'classic', segments };
+  const payload = {
+    sourceLanguage: 'English',
+    targetLanguage: 'Russian',
+    level: args.level,
+    style: 'classic',
+    segments
+  };
   const response = await fetch('https://api.openai.com/v1/responses', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${key}`
+    },
     body: JSON.stringify(openAIRequestBody(payload, args.model))
   });
-  if (!response.ok) throw new Error(`OpenAI error ${response.status}: ${await response.text()}`);
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(`OpenAI error ${response.status}: ${message}`);
+  }
   const data = await response.json();
   return validateTranslationItems(parseOpenAIResponse(data).items);
 }
@@ -56,16 +74,21 @@ async function main() {
     console.log(help());
     process.exit(args.help ? 0 : 1);
   }
+
   const raw = await fs.readFile(args.input, 'utf8');
   const segments = splitByMode(raw, args.mode);
   const chunks = chunkSegments(segments, args.maxChars);
   const all = [];
+
   console.error(`Segments: ${segments.length}. API chunks: ${chunks.length}.`);
   for (let i = 0; i < chunks.length; i += 1) {
     console.error(`Processing chunk ${i + 1}/${chunks.length}...`);
-    const items = args.provider === 'demo' ? chunks[i].map(demoTranslateSegment) : await translateOpenAI(chunks[i], args);
+    const items = args.provider === 'demo'
+      ? chunks[i].map(demoTranslateSegment)
+      : await translateOpenAI(chunks[i], args);
     all.push(...items);
   }
+
   const markdown = formatMarkdown(all, { title: args.title, repeatOriginal: true });
   await fs.mkdir(path.dirname(args.output), { recursive: true });
   await fs.writeFile(args.output, markdown, 'utf8');

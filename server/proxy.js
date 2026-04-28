@@ -18,7 +18,9 @@ app.get('/health', (_req, res) => {
 app.post('/api/frankify', async (req, res) => {
   try {
     const key = process.env.OPENAI_API_KEY;
-    if (!key) return res.status(500).send('OPENAI_API_KEY is missing. Create .env from .env.example.');
+    if (!key) {
+      return res.status(500).send('OPENAI_API_KEY is missing. Create .env from .env.example.');
+    }
 
     const segments = req.body?.segments;
     if (!Array.isArray(segments) || segments.length === 0) {
